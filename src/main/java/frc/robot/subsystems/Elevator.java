@@ -1,5 +1,8 @@
 package frc.robot.subsystems;
 
+import java.util.EnumMap;
+import java.util.Map;
+
 import com.revrobotics.spark.SparkFlex;
 import com.revrobotics.spark.SparkLowLevel.MotorType;
 
@@ -15,28 +18,45 @@ public class Elevator extends SubsystemBase{
     private SparkFlex motor;
     private boolean zeroMode;
 
-    //sim
-    // private DCMotor elevatorGearbox = DCMotor.getNeoVortex(1);
-    // private ElevatorSim elevatorSim = new ElevatorSim(
-    //     elevatorGearbox, 
-    //     Constants.Elevator.elevatorGearing, 
-    //     Constants.Elevator.elevatorWeightKG, 
-    //     Constants.Elevator.spoolDiameter, 
-    //     0, 
-    //     Constants.Elevator.maxHeight, 
-    //     true, 
-    //     0, 
-    //     0.001,
-    //     0);
+    private ElevatorState currentState;
 
-    //private SparkFlexSim motorSim;
+    public enum ElevatorEvent {
+        GO_INTAKE,
+        GO_L1,
+        GO_L2,
+        GO_L3,
+        GO_L4
+    }
+
+    private Map<ElevatorState, Map<ElevatorEvent, ElevatorState>> transitions;
 
     public Elevator(){
         motor = new SparkFlex(Constants.Elevator.elevatorMotorID, MotorType.kBrushless);
+        currentState = ElevatorState.INTAKE;
+        transitions = new EnumMap<>(ElevatorState.class);
+        initializeTransitions();
         setGoalState(ElevatorState.INTAKE);
     }
 
-    /** @param position the desired final state of the elevator */
+    private void initializeTransitions() {
+        for (ElevatorState state : ElevatorState.values()) {
+            transitions.put(state, new EnumMap<>(ElevatorEvent.class));
+            transitions.get(state).put(ElevatorEvent.GO_INTAKE, ElevatorState.INTAKE);
+            transitions.get(state).put(ElevatorEvent.GO_L1, ElevatorState.L1);
+            transitions.get(state).put(ElevatorEvent.GO_L2, ElevatorState.L2);
+            transitions.get(state).put(ElevatorEvent.GO_L3, ElevatorState.L3);
+            transitions.get(state).put(ElevatorEvent.GO_L4, ElevatorState.L4);
+        }
+    }
+
+    public void handleEvent(ElevatorEvent event){
+        Map<ElevatorEvent, ElevatorState> stateTransitions = transitions.get(currentState);
+        if(stateTransitions != null && stateTransitions.containsKey(event)){
+            currentState = stateTransitions.get(event);
+            setGoalState(currentState);
+        }
+    }
+
     public void setGoalState(ElevatorState desiredState){
         Constants.Elevator.elevatorPID.reset(getHeight());
         Constants.Elevator.elevatorPID.setGoal(desiredState.height);
@@ -59,6 +79,7 @@ public class Elevator extends SubsystemBase{
                 zeroMode = false;
                 motor.getEncoder().setPosition(0);
                 setGoalState(ElevatorState.INTAKE);
+                currentState = ElevatorState.INTAKE;
             }
         }
         SmartDashboard.putNumber("encoderPosition", motor.getEncoder().getPosition());
@@ -67,59 +88,26 @@ public class Elevator extends SubsystemBase{
         SmartDashboard.putBoolean("limit switch", motor.getReverseLimitSwitch().isPressed());
     }
 
-    /** toggles zero mode, which lowers elevator at a constant percentage until it hits limit switch and then resets the relative encoder zero to there.*/
     public void toggleZeroElevator(){
         zeroMode = !zeroMode;
     }
 
-    /** @return height of elevator in meters */
     public double getHeight(){
         return motor.getEncoder().getPosition() / Constants.Elevator.rotationsPerMeter;
     }
 
-    // public void simulationPeriodic() {
-    //     elevatorSim.setInput(motorSim.getSetpoint() * RobotController.getBatteryVoltage());
-    //     //System.out.println(motorSim.getSetpoint());
-    //     //System.out.println(.getPositionMeters());
-    //      // In this method, we update our simulation of what our elevator is doing
-    //     // First, we set our "inputs" (voltages)
-    //     motorSim.iterate( // motor velocity, in RPM
-    //         elevatorSim.getVelocityMetersPerSecond() * Constants.Elevator.rotationsPerMeter * 60,
-    //         RoboRioSim.getVInVoltage(), // Simulated battery voltage, in Volts
-    //         0.02); // Time interval, in Seconds
-
-    //     // Next, we update it. The standard loop time is 20ms.
-    //     elevatorSim.update(0.020);
-
-    //     // Finally, we set our simulated encoder's readings and simulated battery voltage
-    //     motorSim.setPosition(elevatorSim.getPositionMeters() * Constants.Elevator.rotationsPerMeter);
-    //     // SimBattery estimates loaded battery voltages
-    //     RoboRioSim.setVInVoltage(
-    //         BatterySim.calculateDefaultBatteryLoadedVoltage(elevatorSim.getCurrentDrawAmps()));
-    // }
-
-    // /** will return 0 if not used during simulation 
-    //  * @return meters
-    // */
-    // public double getSimPosition(){
-    //     if(RobotBase.isReal()) return 0;
-    //     return elevatorSim.getPositionMeters();
-    // }
-
     public class ChangeState extends Command{
-        private Constants.Elevator.ElevatorState elevatorState;
+        private ElevatorEvent event;
         private boolean continuous;
 
-        /** @param elevatorState desired state for the elevator 
-        */
-        public ChangeState(Constants.Elevator.ElevatorState elevatorState){
-            this.elevatorState = elevatorState;
+        public ChangeState(ElevatorEvent event){
+            this.event = event;
             addRequirements(Elevator.this);
         }
 
         @Override
         public void initialize(){
-            Elevator.this.setGoalState(elevatorState);
+            Elevator.this.handleEvent(event);
         }
 
         @Override
